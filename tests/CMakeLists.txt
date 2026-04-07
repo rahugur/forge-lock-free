@@ -1,0 +1,15 @@
+list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/extras)
+include(CTest)
+include(Catch)
+
+function(forge_add_test name source)
+    add_executable(${name} ${source})
+    target_link_libraries(${name} PRIVATE forge_core forge_utils Catch2::Catch2WithMain)
+    catch_discover_tests(${name})
+endfunction()
+
+forge_add_test(test_mpsc_queue        core/test_mpsc_queue.cpp)
+forge_add_test(test_work_stealing     core/test_work_stealing_deque.cpp)
+forge_add_test(test_thread_pool       core/test_thread_pool.cpp)
+forge_add_test(test_concurrent_map    core/test_concurrent_map.cpp)
+forge_add_test(test_rate_limiter      core/test_rate_limiter.cpp)
