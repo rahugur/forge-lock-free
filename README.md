@@ -63,38 +63,38 @@ All benchmarks run on Apple Silicon (M-series), single process, with in-process 
 
 ```
                               ┌─────────────────┐
-                              │   HTTP Client    │
-                              │  (curl / browser)│
+                              │   HTTP Client   │
+                              │ (curl / browser)│
                               └────────┬────────┘
                                        │ REST + SSE
                               ┌────────▼────────┐
-                              │   HTTP Server    │
-                              │  (cpp-httplib)   │
+                              │   HTTP Server   │
+                              │  (cpp-httplib)  │
                               └────────┬────────┘
                                        │
-                              ┌────────▼────────┐
+                              ┌────────▼─────────┐
                               │ SessionManager   │
                               │                  │
                               │ ConcurrentMap    │
                               │ <id, Session*>   │
-                              └────────┬────────┘
+                              └────────┬─────────┘
                                        │ creates workflow per session
-                              ┌────────▼────────┐
+                              ┌────────▼─────────┐
                               │ WorkflowFactory  │
                               │                  │
                               │ "react"          │
                               │ "plan-execute"   │
                               │ "map-reduce"     │
-                              └────────┬────────┘
+                              └────────┬─────────┘
                                        │ runs on ThreadPool
                      ┌─────────────────┼─────────────────┐
-                     │                 │                  │
+                     │                 │                 │
               ┌──────▼──────┐  ┌───────▼───────┐  ┌──────▼──────┐
               │   ReAct     │  │ Plan-Execute  │  │  Map-Reduce │
               │ (loop)      │  │ (3-phase)     │  │ (parallel)  │
               └──────┬──────┘  └───────┬───────┘  └──────┬──────┘
                      │                 │                  │
-              ┌──────▼─────────────────▼──────────────────▼──────┐
+              ┌──────▼─────────────────▼──────────────────▼───────┐
               │                                                   │
               │            LLM Client (OpenAI-compatible)         │
               │     ThrottledLLMClient (Semaphore + RateLimiter)  │
@@ -109,15 +109,15 @@ All benchmarks run on Apple Silicon (M-series), single process, with in-process 
               ┌──────────────────────▼────────────────────────────┐
               │          Lock-Free Concurrency Layer              │
               │                                                   │
-              │  ┌────────────┐  ┌────────────────┐  ┌─────────┐│
-              │  │ MPSC Queue │  │ Work-Stealing  │  │Concurrent││
-              │  │ (Vyukov)   │  │ Deque (Chase-  │  │ Map     ││
-              │  │            │  │ Lev)           │  │(striped) ││
-              │  └────────────┘  └────────────────┘  └─────────┘│
-              │  ┌────────────┐  ┌────────────────┐  ┌─────────┐│
-              │  │ ThreadPool │  │ Future/Promise │  │Semaphore ││
-              │  │(work-steal)│  │ (lock-free)    │  │(atomic)  ││
-              │  └────────────┘  └────────────────┘  └─────────┘│
+              │  ┌────────────┐  ┌────────────────┐  ┌──────────┐ │
+              │  │ MPSC Queue │  │ Work-Stealing  │  │Concurrent│ │
+              │  │ (Vyukov)   │  │ Deque (Chase-  │  │ Map      │ │
+              │  │            │  │ Lev)           │  │(striped) │ │
+              │  └────────────┘  └────────────────┘  └──────────┘ │
+              │  ┌────────────┐  ┌────────────────┐  ┌──────────┐ │
+              │  │ ThreadPool │  │ Future/Promise │  │Semaphore │ │
+              │  │(work-steal)│  │ (lock-free)    │  │(atomic)  │ │
+              │  └────────────┘  └────────────────┘  └──────────┘ │
               └───────────────────────────────────────────────────┘
 ```
 
