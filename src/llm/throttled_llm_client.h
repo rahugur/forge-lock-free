@@ -32,17 +32,24 @@ public:
         // Block until a concurrency slot is available.
         sem_.acquire();
 
-        // Delegate to inner client.
-        auto inner_fut = inner_.complete(messages, tools);
+        // Delegate to inner client. Release semaphore on exception.
+        Future<LLMResponse> inner_fut;
+        try {
+            inner_fut = inner_.complete(messages, tools);
+        } catch (...) {
+            sem_.release();
+            throw;
+        }
 
         // Chain: release the semaphore when the inner future resolves.
         // This avoids occupying a thread pool thread for waiting.
         auto promise = std::make_shared<Promise<LLMResponse>>();
         auto result_fut = promise->get_future();
 
+        auto* sem_ptr = &sem_;
         inner_fut.then(
-            [this, p = std::move(promise)](LLMResponse resp) {
-                sem_.release();
+            [sem_ptr, p = std::move(promise)](LLMResponse resp) {
+                sem_ptr->release();
                 p->set_value(std::move(resp));
             });
 

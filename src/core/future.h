@@ -235,7 +235,7 @@ public:
             delete cont;
             // Mark as consumed so ~SharedState doesn't double-free.
             state_->continuation_.store(
-                detail::sentinel<Cont>(), std::memory_order_relaxed);
+                detail::sentinel<Cont>(), std::memory_order_release);
         }
         // else: stored; set_value/set_exception will pick it up.
     }
@@ -349,7 +349,7 @@ public:
             delete cont;
             // Mark as consumed so ~SharedState doesn't double-free.
             state_->continuation_.store(
-                detail::sentinel<Cont>(), std::memory_order_relaxed);
+                detail::sentinel<Cont>(), std::memory_order_release);
         }
     }
 

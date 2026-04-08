@@ -137,7 +137,7 @@ int main(int argc, char* argv[]) {
     forge::AsyncHttpClient http(pool, {
         /*connect_timeout_sec=*/10,
         /*read_timeout_sec=*/120,
-        /*block_private_ips=*/false
+        /*block_private_ips=*/true
     });
 
     forge::LLMClientConfig llm_cfg;

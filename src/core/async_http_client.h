@@ -9,6 +9,12 @@
 
 #include <httplib.h>
 
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+
+#include <cstring>
 #include <string>
 #include <unordered_map>
 #include <stdexcept>
@@ -108,35 +114,131 @@ private:
     }
 
     /// Extract the host portion from a scheme://host:port string.
+    /// Handles IPv6 brackets and strips any userinfo (user@) component.
     static std::string extract_host(const std::string& scheme_host_port) {
         auto scheme_end = scheme_host_port.find("://");
         std::string rest = (scheme_end != std::string::npos)
             ? scheme_host_port.substr(scheme_end + 3)
             : scheme_host_port;
+
+        // Strip userinfo (anything before @) to prevent user@host bypass.
+        auto at_pos = rest.find('@');
+        if (at_pos != std::string::npos) {
+            rest = rest.substr(at_pos + 1);
+        }
+
+        // Handle IPv6 bracket notation: [::1] or [::ffff:127.0.0.1]:port
+        if (!rest.empty() && rest[0] == '[') {
+            auto bracket_end = rest.find(']');
+            if (bracket_end != std::string::npos) {
+                return rest.substr(1, bracket_end - 1);
+            }
+        }
+
         auto colon = rest.find(':');
         return (colon != std::string::npos) ? rest.substr(0, colon) : rest;
     }
 
-    /// SSRF guard: reject URLs targeting private/link-local/metadata IPs.
-    static void check_ssrf(const std::string& host) {
-        // Block well-known private ranges by prefix.
-        static const std::vector<std::string> blocked_prefixes = {
-            "10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.",
-            "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
-            "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
-            "169.254.",  // link-local / cloud metadata
-            "127.",      // loopback
-            "0.",        // "this" network
-        };
-        for (auto& prefix : blocked_prefixes) {
-            if (host.compare(0, prefix.size(), prefix) == 0) {
-                throw std::invalid_argument(
-                    "SSRF blocked: private/link-local IP " + host);
-            }
+    /// Check if an IPv4 address (in network byte order) is private/loopback/link-local.
+    static bool is_private_ipv4(uint32_t addr_net) {
+        uint32_t addr = ntohl(addr_net);
+        uint8_t a = (addr >> 24) & 0xFF;
+        uint8_t b = (addr >> 16) & 0xFF;
+
+        if (a == 10) return true;                              // 10.0.0.0/8
+        if (a == 172 && b >= 16 && b <= 31) return true;       // 172.16.0.0/12
+        if (a == 192 && b == 168) return true;                 // 192.168.0.0/16
+        if (a == 127) return true;                             // 127.0.0.0/8
+        if (a == 169 && b == 254) return true;                 // 169.254.0.0/16 (link-local/metadata)
+        if (a == 0) return true;                               // 0.0.0.0/8
+        return false;
+    }
+
+    /// Check if an IPv6 address is loopback, link-local, or IPv4-mapped private.
+    static bool is_private_ipv6(const struct in6_addr& addr) {
+        // ::1 (loopback)
+        static const struct in6_addr loopback = IN6ADDR_LOOPBACK_INIT;
+        if (memcmp(&addr, &loopback, sizeof(addr)) == 0) return true;
+
+        // :: (unspecified)
+        static const struct in6_addr any = IN6ADDR_ANY_INIT;
+        if (memcmp(&addr, &any, sizeof(addr)) == 0) return true;
+
+        // fe80::/10 (link-local)
+        if (addr.s6_addr[0] == 0xfe && (addr.s6_addr[1] & 0xc0) == 0x80) return true;
+
+        // fc00::/7 (unique local)
+        if ((addr.s6_addr[0] & 0xfe) == 0xfc) return true;
+
+        // ::ffff:0:0/96 (IPv4-mapped) -- check the embedded IPv4
+        bool is_v4_mapped = true;
+        for (int i = 0; i < 10; ++i) {
+            if (addr.s6_addr[i] != 0) { is_v4_mapped = false; break; }
         }
-        if (host == "localhost" || host == "::1" || host.empty()) {
+        if (is_v4_mapped && addr.s6_addr[10] == 0xff && addr.s6_addr[11] == 0xff) {
+            uint32_t v4;
+            memcpy(&v4, &addr.s6_addr[12], 4);
+            return is_private_ipv4(v4);
+        }
+
+        return false;
+    }
+
+    /// SSRF guard: resolve hostname to IP and reject private/loopback/link-local addresses.
+    static void check_ssrf(const std::string& host) {
+        if (host.empty()) {
+            throw std::invalid_argument("SSRF blocked: empty host");
+        }
+
+        // First, try to parse as a literal IP address (handles octal, hex, etc.).
+        struct in_addr v4;
+        if (inet_pton(AF_INET, host.c_str(), &v4) == 1) {
+            if (is_private_ipv4(v4.s_addr)) {
+                throw std::invalid_argument("SSRF blocked: private IP " + host);
+            }
+            return;
+        }
+
+        struct in6_addr v6;
+        if (inet_pton(AF_INET6, host.c_str(), &v6) == 1) {
+            if (is_private_ipv6(v6)) {
+                throw std::invalid_argument("SSRF blocked: private IPv6 " + host);
+            }
+            return;
+        }
+
+        // It's a hostname -- resolve it and check ALL returned addresses.
+        struct addrinfo hints{};
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+
+        struct addrinfo* result = nullptr;
+        int ret = getaddrinfo(host.c_str(), nullptr, &hints, &result);
+        if (ret != 0) {
             throw std::invalid_argument(
-                "SSRF blocked: loopback host " + host);
+                "SSRF blocked: cannot resolve host " + host);
+        }
+
+        // RAII cleanup for addrinfo.
+        struct AddrInfoGuard {
+            struct addrinfo* p;
+            ~AddrInfoGuard() { if (p) freeaddrinfo(p); }
+        } guard{result};
+
+        for (auto* rp = result; rp != nullptr; rp = rp->ai_next) {
+            if (rp->ai_family == AF_INET) {
+                auto* sa = reinterpret_cast<struct sockaddr_in*>(rp->ai_addr);
+                if (is_private_ipv4(sa->sin_addr.s_addr)) {
+                    throw std::invalid_argument(
+                        "SSRF blocked: " + host + " resolves to private IP");
+                }
+            } else if (rp->ai_family == AF_INET6) {
+                auto* sa = reinterpret_cast<struct sockaddr_in6*>(rp->ai_addr);
+                if (is_private_ipv6(sa->sin6_addr)) {
+                    throw std::invalid_argument(
+                        "SSRF blocked: " + host + " resolves to private IPv6");
+                }
+            }
         }
     }
 

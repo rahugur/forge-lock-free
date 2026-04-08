@@ -7,10 +7,14 @@
 
 #include <array>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <sstream>
 #include <vector>
+#include <sys/wait.h>
+#include <unistd.h>
 
 namespace forge {
 namespace builtin {
@@ -76,30 +80,77 @@ inline void register_shell(ToolRegistry& registry,
                 }
             }
 
-            // Security: reject shell metacharacters that could escape the allowlist.
+            // Security: reject ALL shell metacharacters that could escape the allowlist.
             for (char c : command) {
                 if (c == ';' || c == '&' || c == '|' || c == '`' ||
-                    c == '$' || c == '\n' || c == '\r') {
+                    c == '$' || c == '\n' || c == '\r' || c == '>' ||
+                    c == '<' || c == '(' || c == ')' || c == '{' ||
+                    c == '}' || c == '!' || c == '\\' || c == '\'' ||
+                    c == '"') {
                     throw std::runtime_error(
                         "Shell metacharacter '" + std::string(1, c) +
                         "' not allowed in commands");
                 }
             }
 
-            // Redirect stderr to stdout.
-            std::string cmd = command + " 2>&1";
-            std::unique_ptr<FILE, int(*)(FILE*)> pipe(
-                popen(cmd.c_str(), "r"), pclose);
-
-            if (!pipe) {
-                throw std::runtime_error("Failed to execute command");
+            // Tokenize the command into argv for execvp (no shell involved).
+            std::vector<std::string> tokens;
+            {
+                std::istringstream iss(command);
+                std::string token;
+                while (iss >> token) {
+                    tokens.push_back(token);
+                }
             }
+            if (tokens.empty()) {
+                throw std::runtime_error("Empty command after parsing");
+            }
+
+            // Build argv array for execvp.
+            std::vector<char*> argv;
+            for (auto& t : tokens) {
+                argv.push_back(t.data());
+            }
+            argv.push_back(nullptr);
+
+            // Create pipe for capturing stdout+stderr.
+            int pipefd[2];
+            if (pipe(pipefd) != 0) {
+                throw std::runtime_error("Failed to create pipe");
+            }
+
+            pid_t pid = fork();
+            if (pid < 0) {
+                close(pipefd[0]);
+                close(pipefd[1]);
+                throw std::runtime_error("Failed to fork");
+            }
+
+            if (pid == 0) {
+                // Child: redirect stdout and stderr to the pipe write end.
+                close(pipefd[0]);
+                dup2(pipefd[1], STDOUT_FILENO);
+                dup2(pipefd[1], STDERR_FILENO);
+                close(pipefd[1]);
+
+                execvp(argv[0], argv.data());
+                // If execvp returns, it failed.
+                _exit(127);
+            }
+
+            // Parent: read from pipe read end.
+            close(pipefd[1]);
 
             std::string output;
             std::array<char, 4096> buf;
-            while (fgets(buf.data(), buf.size(), pipe.get()) != nullptr) {
-                output += buf.data();
+            ssize_t n;
+            while ((n = read(pipefd[0], buf.data(), buf.size())) > 0) {
+                output.append(buf.data(), static_cast<size_t>(n));
             }
+            close(pipefd[0]);
+
+            int status = 0;
+            waitpid(pid, &status, 0);
 
             // Truncate very long output.
             constexpr size_t MAX_OUTPUT = 50000;

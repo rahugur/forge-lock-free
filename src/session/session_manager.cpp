@@ -2,6 +2,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+
 namespace forge {
 
 SessionManager::SessionManager(ThreadPool& pool, ILLMClient& llm,
@@ -14,15 +16,24 @@ SessionManager::SessionManager(ThreadPool& pool, ILLMClient& llm,
     spdlog::info("SessionManager: capacity={}", max_sessions_);
 }
 
+SessionManager::~SessionManager() {
+    // Wait for all in-flight workflow tasks to complete.
+    std::vector<Future<void>> tasks;
+    {
+        std::lock_guard lock(inflight_mutex_);
+        tasks = std::move(inflight_);
+    }
+    for (auto& f : tasks) {
+        if (f.valid()) {
+            f.get();
+        }
+    }
+}
+
 std::variant<uint64_t, std::string>
 SessionManager::create_session(CreateSessionRequest req) {
     if (!factory_.has(req.workflow)) {
         return std::string("Unknown workflow: " + req.workflow);
-    }
-
-    if (sessions_.size() >= max_sessions_) {
-        return std::string("At capacity (" +
-            std::to_string(max_sessions_) + " sessions)");
     }
 
     auto id = next_id_.fetch_add(1, std::memory_order_relaxed);
@@ -43,15 +54,19 @@ SessionManager::create_session(CreateSessionRequest req) {
     user.content = req.prompt;
     session->history.push(std::move(user));
 
-    sessions_.insert(id, session);
+    // Atomic capacity check + insert to prevent TOCTOU race.
+    if (!sessions_.insert_if_under(id, session, max_sessions_)) {
+        return std::string("At capacity (" +
+            std::to_string(max_sessions_) + " sessions)");
+    }
 
     spdlog::info("Session {} created (prompt: \"{}...\")",
                  id, req.prompt.substr(0, 40));
 
-    // Dispatch the workflow on the thread pool (fire-and-forget).
+    // Dispatch the workflow on the thread pool and track the future.
     auto sess_ptr = session;  // capture a copy of the shared_ptr
     auto workflow_name = req.workflow;
-    pool_.submit([this, sess_ptr, workflow_name]() {
+    auto fut = pool_.submit([this, sess_ptr, workflow_name]() {
         sess_ptr->state.store(SessionState::WAITING_FOR_LLM, std::memory_order_release);
 
         auto wf = factory_.create(workflow_name, llm_, executor_, registry_, pool_);
@@ -63,6 +78,16 @@ SessionManager::create_session(CreateSessionRequest req) {
                      result.steps_taken,
                      workflow_name);
     });
+
+    {
+        std::lock_guard lock(inflight_mutex_);
+        // Clean up completed futures before adding a new one.
+        inflight_.erase(
+            std::remove_if(inflight_.begin(), inflight_.end(),
+                [](const Future<void>& f) { return f.ready(); }),
+            inflight_.end());
+        inflight_.push_back(std::move(fut));
+    }
 
     return id;
 }

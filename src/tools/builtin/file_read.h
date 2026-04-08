@@ -5,6 +5,7 @@
 #include "tools/tool_spec.h"
 #include "utils/json.h"
 
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -46,23 +47,45 @@ inline void register_file_read(ToolRegistry& registry,
                 throw std::runtime_error("Missing 'path' parameter");
             }
 
-            // Security: reject directory traversal.
-            if (path.find("..") != std::string::npos) {
-                throw std::runtime_error("Directory traversal not allowed: " + path);
-            }
-
-            // Security: reject absolute paths (unless under sandbox).
-            if (!path.empty() && path[0] == '/') {
-                if (sandbox_dir.empty() || path.find(sandbox_dir) != 0) {
-                    throw std::runtime_error("Absolute paths not allowed: " + path);
+            // Security: resolve the canonical sandbox directory.
+            std::filesystem::path sandbox_canonical;
+            if (!sandbox_dir.empty()) {
+                std::error_code ec;
+                sandbox_canonical = std::filesystem::canonical(sandbox_dir, ec);
+                if (ec) {
+                    throw std::runtime_error("Invalid sandbox directory: " + sandbox_dir);
                 }
             }
 
-            // Prepend sandbox dir if path is relative.
-            std::string full_path = path;
+            // Build the full path: relative paths are resolved against the sandbox.
+            std::filesystem::path requested;
             if (!sandbox_dir.empty() && path[0] != '/') {
-                full_path = sandbox_dir + "/" + path;
+                requested = sandbox_canonical / path;
+            } else {
+                requested = path;
             }
+
+            // Resolve to canonical form (follows symlinks, resolves ..).
+            std::error_code ec;
+            std::filesystem::path canonical_path = std::filesystem::canonical(requested, ec);
+            if (ec) {
+                throw std::runtime_error("Cannot resolve path: " + path);
+            }
+
+            // Security: verify the canonical path is under the sandbox.
+            if (!sandbox_dir.empty()) {
+                std::string canonical_str = canonical_path.string();
+                std::string sandbox_str = sandbox_canonical.string();
+                // The canonical path must start with sandbox path followed by '/' (or be exact match).
+                if (canonical_str != sandbox_str &&
+                    (canonical_str.size() <= sandbox_str.size() ||
+                     canonical_str.compare(0, sandbox_str.size(), sandbox_str) != 0 ||
+                     canonical_str[sandbox_str.size()] != '/')) {
+                    throw std::runtime_error("Path escapes sandbox: " + path);
+                }
+            }
+
+            std::string full_path = canonical_path.string();
 
             std::ifstream ifs(full_path);
             if (!ifs.is_open()) {

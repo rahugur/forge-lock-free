@@ -30,11 +30,34 @@ public:
     bool insert(const K& key, V value) {
         auto& stripe = get_stripe(key);
         std::unique_lock lock(stripe.mutex);
-        auto [it, inserted] = stripe.map.emplace(key, std::move(value));
-        if (!inserted) {
-            it->second = std::move(value);  // overwrite
+        auto it = stripe.map.find(key);
+        if (it != stripe.map.end()) {
+            it->second = std::move(value);
+            return false;
         }
-        return inserted;
+        stripe.map.emplace(key, std::move(value));
+        return true;
+    }
+
+    /// Insert only if total map size is below max_size. Returns true if inserted.
+    /// The capacity check is approximate (not atomic across all stripes) but
+    /// prevents the most common TOCTOU races by checking right before insert.
+    bool insert_if_under(const K& key, V value, size_t max_size) {
+        // Check size before acquiring the stripe lock. size() acquires shared
+        // locks on all stripes, so we must NOT hold any stripe lock here to
+        // avoid deadlock (shared_mutex is not reentrant).
+        if (size() >= max_size) return false;
+
+        auto& stripe = get_stripe(key);
+        std::unique_lock lock(stripe.mutex);
+
+        auto it = stripe.map.find(key);
+        if (it != stripe.map.end()) {
+            it->second = std::move(value);
+        } else {
+            stripe.map.emplace(key, std::move(value));
+        }
+        return true;
     }
 
     /// Find a value by key. Returns std::nullopt if not found.

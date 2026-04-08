@@ -4,6 +4,7 @@
 // Backed by ConcurrentMap for lock-free reads.
 
 #include "core/concurrent_map.h"
+#include "core/future.h"
 #include "core/thread_pool.h"
 #include "llm/llm_client_interface.h"
 #include "session/session.h"
@@ -13,6 +14,7 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <variant>
@@ -41,6 +43,11 @@ public:
     SessionManager(ThreadPool& pool, ILLMClient& llm,
                    ToolExecutor& executor, const ToolRegistry& registry,
                    const WorkflowFactory& factory, unsigned max_sessions);
+    ~SessionManager();
+
+    // Non-copyable, non-movable.
+    SessionManager(const SessionManager&) = delete;
+    SessionManager& operator=(const SessionManager&) = delete;
 
     /// Create a new session and dispatch it on the thread pool.
     /// Returns session ID on success, or error string on failure.
@@ -72,6 +79,10 @@ private:
 
     std::atomic<uint64_t> next_id_{1};
     ConcurrentMap<uint64_t, std::shared_ptr<Session>> sessions_;
+
+    // Track in-flight workflow futures so destructor can wait for them.
+    std::mutex inflight_mutex_;
+    std::vector<Future<void>> inflight_;
 };
 
 }  // namespace forge
