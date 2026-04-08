@@ -88,13 +88,13 @@ All benchmarks run on Apple Silicon (M-series), single process, with in-process 
                               └────────┬────────┘
                                        │ runs on ThreadPool
                      ┌─────────────────┼─────────────────┐
-                     │                 │                  │
+                     │                 │                 │
               ┌──────▼──────┐  ┌───────▼───────┐  ┌──────▼──────┐
               │   ReAct     │  │ Plan-Execute  │  │  Map-Reduce │
               │ (loop)      │  │ (3-phase)     │  │ (parallel)  │
               └──────┬──────┘  └───────┬───────┘  └──────┬──────┘
-                     │                 │                  │
-              ┌──────▼─────────────────▼──────────────────▼───────┐
+                     │                 │                 │
+              ┌──────▼─────────────────▼─────────────────▼────────┐
               │                                                   │
               │            LLM Client (OpenAI-compatible)         │
               │     ThrottledLLMClient (Semaphore + RateLimiter)  │
