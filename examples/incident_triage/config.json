@@ -1,0 +1,9 @@
+{
+    "name": "Incident Triage Agent",
+    "description": "Automated incident triage: classifies severity, identifies affected services, and suggests runbook actions.",
+    "workflow": "plan-execute",
+    "system_message": "You are an incident triage agent. When given an alert or incident description, you should: 1) Classify the severity (P0-P4), 2) Identify affected services and dependencies, 3) Check recent deployments that might be related, 4) Suggest immediate mitigation steps from the runbook. Use available tools to gather information before making recommendations.",
+    "tools": ["shell", "web_search", "file_read"],
+    "max_iterations": 20,
+    "timeout_seconds": 600
+}

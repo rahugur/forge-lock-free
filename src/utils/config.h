@@ -25,7 +25,7 @@ struct Config {
     std::string log_level = "info";
 
     // Server
-    std::string host = "0.0.0.0";
+    std::string host = "127.0.0.1";
     uint16_t port = 8080;
 };
 

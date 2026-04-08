@@ -83,10 +83,18 @@ private:
         int64_t elapsed_us = now - prev;
         if (elapsed_us <= 0) return;
 
-        // Try to claim the refill window
-        if (!last_refill_.compare_exchange_strong(prev, now,
-                std::memory_order_acq_rel, std::memory_order_relaxed)) {
-            return;  // Another thread did the refill
+        // CAS loop: every thread computes tokens for the window it claims.
+        // On CAS failure we reload prev and retry with the new window,
+        // so no thread's refill contribution is lost.
+        while (true) {
+            if (!last_refill_.compare_exchange_weak(prev, now,
+                    std::memory_order_acq_rel, std::memory_order_relaxed)) {
+                // Another thread moved the timestamp. Recompute our window.
+                elapsed_us = now - prev;
+                if (elapsed_us <= 0) return;
+                continue;
+            }
+            break;
         }
 
         int64_t new_tokens = static_cast<int64_t>(

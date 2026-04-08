@@ -103,7 +103,9 @@ public:
 
     bool empty() const { return size() == 0; }
 
-    /// Collect all keys (snapshot under stripe-by-stripe locking).
+    /// Collect all keys.
+    /// NOTE: not a consistent snapshot — keys may be added/removed between
+    /// stripe iterations.  Use only for diagnostics or approximate enumeration.
     std::vector<K> keys() const {
         std::vector<K> result;
         for (const auto& stripe : stripes_) {

@@ -2,9 +2,12 @@
 
 #include <spdlog/spdlog.h>
 
+#include <random>
+
 namespace forge {
 
 thread_local int t_worker_id = -1;
+thread_local ThreadPool* t_pool = nullptr;
 
 ThreadPool::ThreadPool(unsigned num_threads)
     : num_threads_(num_threads == 0
@@ -27,15 +30,22 @@ ThreadPool::ThreadPool(unsigned num_threads)
 
 ThreadPool::~ThreadPool() {
     stop_.store(true, std::memory_order_release);
-    // Wake all sleeping workers so they observe the stop flag
-    wake_cv_.notify_all();
+    // Bump epoch to wake all sleeping workers.
+    epoch_.fetch_add(1, std::memory_order_release);
+
     for (auto& t : threads_) {
         if (t.joinable()) {
             t.join();
         }
     }
-    // All workers have exited. Single-threaded drain of any remaining
-    // tasks in the submission queues (shouldn't happen normally, but be safe).
+    // All workers have exited.  Single-threaded final drain of any
+    // remaining tasks (shouldn't happen normally, but prevents leaks).
+    for (auto& dq : deques_) {
+        while (auto t = dq->pop()) {
+            (*(*t))();
+            delete *t;
+        }
+    }
     for (auto& sq : submission_queues_) {
         while (auto task = sq->pop()) {
             (*(*task))();
@@ -47,6 +57,12 @@ ThreadPool::~ThreadPool() {
 
 void ThreadPool::worker_loop(unsigned id) {
     t_worker_id = id;
+
+    // Install yield callback so Future::get() can process tasks while waiting.
+    t_pool = this;
+    detail::yield_fn = []() -> bool {
+        return t_pool->try_process_one(t_worker_id);
+    };
 
     // Thread-local RNG for picking steal targets
     std::mt19937 rng(id * 31 + 7);
@@ -70,7 +86,7 @@ void ThreadPool::worker_loop(unsigned id) {
             }
         }
 
-        // 2. Try submission queue (FIFO - optimized for root tasks)
+        // 2. Try submission queue (FIFO — optimized for root tasks)
         if (!task_ptr) {
             if (auto s = submission_queues_[id]->pop()) {
                 task_ptr = *s;
@@ -114,26 +130,65 @@ void ThreadPool::worker_loop(unsigned id) {
             return;
         }
 
-        // 6. Sleep briefly to avoid busy-spinning
-        {
-            std::unique_lock<std::mutex> lock(wake_mutex_);
-            sleeping_count_.fetch_add(1, std::memory_order_seq_cst);
-            // Re-check queues under lock to avoid sleep/wake race condition
-            if (deques_[id]->empty() && submission_queues_[id]->empty()) {
-                wake_cv_.wait_for(lock, std::chrono::microseconds(200), [this, id] {
-                    return stop_.load(std::memory_order_relaxed) || !submission_queues_[id]->empty();
-                });
-            }
-            sleeping_count_.fetch_sub(1, std::memory_order_seq_cst);
+        // 6. Lock-free idle: snapshot the epoch, spin briefly, then
+        //    sleep in short increments until the epoch changes.
+        //    No mutex is ever taken on this path.
+        uint64_t snapshot = epoch_.load(std::memory_order_acquire);
+
+        // Brief spin — gives submitters a window before we sleep.
+        for (int spin = 0; spin < 32; ++spin) {
+            if (epoch_.load(std::memory_order_acquire) != snapshot) break;
+            if (!deques_[id]->empty() || !submission_queues_[id]->empty()) break;
+            std::this_thread::yield();
+        }
+
+        // If still idle, sleep in short bursts (avoids burning CPU).
+        // Each iteration re-checks stop, own queues, and epoch.
+        if (epoch_.load(std::memory_order_acquire) == snapshot
+            && deques_[id]->empty() && submission_queues_[id]->empty()) {
+            std::this_thread::sleep_for(std::chrono::microseconds(50));
         }
     }
 }
 
-void ThreadPool::wake_one() {
-    if (sleeping_count_.load(std::memory_order_seq_cst) > 0) {
-        std::lock_guard<std::mutex> lock(wake_mutex_);
-        wake_cv_.notify_one();
+bool ThreadPool::try_process_one(unsigned id) {
+    Task task_ptr = nullptr;
+
+    // 1. Try own deque (subtasks from current workflow).
+    if (auto t = deques_[id]->pop()) {
+        task_ptr = *t;
     }
+
+    // 2. Try own submission queue.
+    if (!task_ptr) {
+        if (auto s = submission_queues_[id]->pop()) {
+            task_ptr = *s;
+        }
+    }
+
+    // 3. Try stealing from a random peer's deque.
+    if (!task_ptr) {
+        for (unsigned i = 0; i < num_threads_; ++i) {
+            if (i != id) {
+                if (auto t = deques_[i]->steal()) {
+                    task_ptr = *t;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (task_ptr) {
+        (*task_ptr)();
+        delete task_ptr;
+        return true;
+    }
+    return false;
+}
+
+void ThreadPool::notify() {
+    // Lock-free: bump epoch so sleeping workers detect new work.
+    epoch_.fetch_add(1, std::memory_order_release);
 }
 
 }  // namespace forge

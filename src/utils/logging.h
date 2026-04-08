@@ -6,22 +6,22 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <memory>
+#include <mutex>
 #include <string>
 
 namespace forge {
 namespace logging {
 
 /// Initialize the default Forge logger.
-/// Call once at startup. Safe to call multiple times (idempotent).
+/// Thread-safe and idempotent — safe to call from multiple threads.
 inline void init(const std::string& level = "info") {
-    static bool initialized = false;
-    if (initialized) return;
-
-    auto console = spdlog::stdout_color_mt("forge");
-    console->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [tid %t] %v");
-    spdlog::set_default_logger(console);
-    spdlog::set_level(spdlog::level::from_str(level));
-    initialized = true;
+    static std::once_flag flag;
+    std::call_once(flag, [&level]() {
+        auto console = spdlog::stdout_color_mt("forge");
+        console->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^%l%$] [tid %t] %v");
+        spdlog::set_default_logger(console);
+        spdlog::set_level(spdlog::level::from_str(level));
+    });
 }
 
 /// Change the log level at runtime.

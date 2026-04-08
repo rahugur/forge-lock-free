@@ -11,11 +11,15 @@
 #include <cstdint>
 #include <cassert>
 #include <memory>
+#include <type_traits>
 
 namespace forge {
 
 template <typename T>
 class WorkStealingDeque {
+    static_assert(std::is_trivially_copyable_v<T>,
+                  "WorkStealingDeque requires a trivially copyable type "
+                  "(std::atomic<T> mandates this).");
 public:
     explicit WorkStealingDeque(int64_t capacity = 1024)
         : top_(0), bottom_(0) {
@@ -48,8 +52,10 @@ public:
         }
 
         buf->put(b, std::move(value));
-        std::atomic_thread_fence(std::memory_order_release);
-        bottom_.store(b + 1, std::memory_order_relaxed);
+        // Release store ensures the item write (and any preceding writes
+        // to the data the item points to) are visible to stealing threads
+        // that acquire-load bottom_.
+        bottom_.store(b + 1, std::memory_order_release);
     }
 
     /// Pop from the bottom (owner thread only). Returns nullopt if empty.
@@ -92,7 +98,7 @@ public:
         int64_t b = bottom_.load(std::memory_order_acquire);
 
         if (t < b) {
-            auto* buf = buffer_.load(std::memory_order_consume);
+            auto* buf = buffer_.load(std::memory_order_acquire);
             auto value = buf->get(t);
             if (!top_.compare_exchange_strong(t, t + 1,
                     std::memory_order_seq_cst, std::memory_order_relaxed)) {

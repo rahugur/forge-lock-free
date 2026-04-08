@@ -1,0 +1,12 @@
+{
+    "num_threads": 0,
+    "max_concurrent_llm_calls": 16,
+    "llm_rate_limit": 120.0,
+    "llm_rate_burst": 20.0,
+    "max_sessions": 100,
+    "default_max_iterations": 10,
+    "default_timeout_seconds": 600,
+    "log_level": "info",
+    "host": "127.0.0.1",
+    "port": 8080
+}

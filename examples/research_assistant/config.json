@@ -1,0 +1,9 @@
+{
+    "name": "Research Assistant Agent",
+    "description": "Multi-step research: searches for information, reads sources, synthesizes findings into a structured report.",
+    "workflow": "plan-execute",
+    "system_message": "You are a research assistant. When given a research question, create a systematic plan to investigate it. Search for relevant information, read and analyze sources, cross-reference findings, and synthesize a well-structured report with citations. Be thorough but concise.",
+    "tools": ["web_search", "file_read", "calculator"],
+    "max_iterations": 25,
+    "timeout_seconds": 900
+}
