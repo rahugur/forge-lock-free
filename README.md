@@ -92,7 +92,7 @@ All benchmarks run on Apple Silicon (M-series), single process, with in-process 
               ┌──────▼──────┐  ┌───────▼───────┐  ┌──────▼──────┐
               │   ReAct     │  │ Plan-Execute  │  │  Map-Reduce │
               │ (loop)      │  │ (3-phase)     │  │ (parallel)  │
-              └──────┬──────┘  └───────┬───────┘  └──────┬──────┘
+              └──────┬──────┘  └───────┬───────┘  └───────┬─────┘
                      │                 │                  │
               ┌──────▼─────────────────▼──────────────────▼───────┐
               │                                                   │
