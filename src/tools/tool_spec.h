@@ -13,7 +13,7 @@ namespace forge {
 struct ToolSpec {
     std::string name;
     std::string description;
-    Json parameters;  // JSON Schema for the tool's parameters
+    vortex::Json parameters;  // JSON Schema for the tool's parameters
 
     std::chrono::milliseconds timeout{30000};
     bool allow_parallel = true;   // can run alongside other tools?
