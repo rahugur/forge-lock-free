@@ -48,7 +48,7 @@ struct Message {
         }
 
         if (!tool_calls.empty()) {
-            vortex::Json calls = Json::array();
+            Json calls = Json::array();
             for (auto& tc : tool_calls) {
                 calls.push_back({
                     {"id", tc.id},
