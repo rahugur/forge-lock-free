@@ -37,6 +37,8 @@ All benchmarks run on Apple Silicon (M-series), single process, with in-process 
 | **Memory per session** | <1 KB | ~2-5 MB | ~5-10 MB | **2000-10000x less** |
 | **Concurrent scaling** | Linear with cores | GIL-limited | GIL-limited | Truly parallel |
 
+All benchmarks use mock LLM with 0ms latency, measuring orchestration overhead only. Real-world throughput with LLM calls is bound by LLM latency.
+
 ### Why Is The Gap So Large?
 
 1. **No GIL.** Forge threads execute in true parallel. Python's `asyncio` gives concurrency (interleaving) but not parallelism (simultaneous execution).
