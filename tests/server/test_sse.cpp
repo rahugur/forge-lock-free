@@ -24,9 +24,21 @@
 
 struct RegexWarmup {
     RegexWarmup() {
-        std::regex dummy(".*");
+        std::locale loc;
+        const auto& ctype = std::use_facet<std::ctype<char>>(loc);
+        for (int i = 0; i < 256; ++i) {
+            volatile char n = ctype.narrow(static_cast<char>(i), '0');
+            volatile char w = ctype.widen(static_cast<char>(i));
+            (void)n;
+            (void)w;
+        }
+        
+        std::regex dummy(R"([a-zA-Z0-9_:/?.#\[\]-]+)", std::regex_constants::icase);
         std::cmatch match;
-        std::regex_match("warmup", match, dummy);
+        if (std::regex_match("http://127.0.0.1:8080/path", match, dummy)) {
+            volatile size_t x = match.size();
+            (void)x;
+        }
     }
 } global_warmup;
 
