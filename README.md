@@ -1,5 +1,9 @@
 # Forge — Lock-Free Agent Orchestration Runtime
 
+[![CI](https://github.com/rahugur/forge-lock-free/actions/workflows/ci.yml/badge.svg)](https://github.com/rahugur/forge-lock-free/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://isocpp.org/)
+
 > A high-performance C++17 agent runtime that orchestrates LLM-powered workflows using lock-free concurrency primitives. Built to demonstrate that agent orchestration doesn't have to be slow — Forge handles **25,000+ sessions/sec** where Python frameworks like LangChain manage ~50. Forge's `src/core/` primitives also power [Vortex](https://github.com/rahugur/vortex-lock-free-rag), a lock-free RAG inference engine that integrates with Forge for in-process agent + retrieval.
 
 ---
