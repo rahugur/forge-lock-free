@@ -36,8 +36,8 @@ struct Message {
     bool has_content() const { return !content.empty(); }
 
     /// Serialize to OpenAI JSON format.
-    vortex::Json to_json() const {
-        vortex::Json j;
+    Json to_json() const {
+        Json j;
         j["role"] = role;
 
         if (!content.empty()) {
@@ -70,7 +70,7 @@ struct Message {
     }
 
     /// Parse from OpenAI JSON response.
-    static Message from_json(const vortex::Json& j) {
+    static Message from_json(const Json& j) {
         Message msg;
         msg.role = j.value("role", "");
         if (j.contains("content") && !j["content"].is_null()) {
