@@ -19,6 +19,17 @@
 #include <thread>
 #include <vector>
 
+#include <catch2/catch_test_macros.hpp>
+#include <regex>
+
+struct RegexWarmup {
+    RegexWarmup() {
+        std::regex dummy(".*");
+        std::smatch match;
+        std::regex_match("warmup", match, dummy);
+    }
+} global_warmup;
+
 namespace {
 
 struct MockLLM {
