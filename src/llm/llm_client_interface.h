@@ -15,8 +15,8 @@ public:
     virtual ~ILLMClient() = default;
 
     /// Send a chat completion request.
-    virtual Future<LLMResponse> complete(const vortex::Json& messages,
-                                         const vortex::Json& tools = Json()) = 0;
+    virtual Future<LLMResponse> complete(const Json& messages,
+                                         const Json& tools = Json()) = 0;
 
     /// Access the client configuration.
     virtual const LLMClientConfig& config() const = 0;
