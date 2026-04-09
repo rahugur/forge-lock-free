@@ -25,7 +25,7 @@
 struct RegexWarmup {
     RegexWarmup() {
         std::regex dummy(".*");
-        std::smatch match;
+        std::cmatch match;
         std::regex_match("warmup", match, dummy);
     }
 } global_warmup;
