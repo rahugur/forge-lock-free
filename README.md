@@ -1,6 +1,6 @@
 # Forge — Lock-Free Agent Orchestration Runtime
 
-> A high-performance C++17 agent runtime that orchestrates LLM-powered workflows using lock-free concurrency primitives. Built to demonstrate that agent orchestration doesn't have to be slow — Forge handles **25,000+ sessions/sec** where Python frameworks like LangChain manage ~50.
+> A high-performance C++17 agent runtime that orchestrates LLM-powered workflows using lock-free concurrency primitives. Built to demonstrate that agent orchestration doesn't have to be slow — Forge handles **25,000+ sessions/sec** where Python frameworks like LangChain manage ~50. Forge's `src/core/` primitives also power [Vortex](https://github.com/rahugur/vortex-lock-free-rag), a lock-free RAG inference engine that integrates with Forge for in-process agent + retrieval.
 
 ---
 
@@ -62,15 +62,15 @@ All benchmarks run on Apple Silicon (M-series), single process, with in-process 
 ## Architecture
 
 ```
-                              ┌─────────────────┐
-                              │   HTTP Client   │
-                              │ (curl / browser)│
-                              └────────┬────────┘
+                              ┌──────────────────┐
+                              │   HTTP Client    │
+                              │  (curl / browser)│
+                              └────────┬─────────┘
                                        │ REST + SSE
-                              ┌────────▼────────┐
-                              │   HTTP Server   │
-                              │  (cpp-httplib)  │
-                              └────────┬────────┘
+                              ┌────────▼─────────┐
+                              │   HTTP Server    │
+                              │  (cpp-httplib)   │
+                              └────────┬─────────┘
                                        │
                               ┌────────▼─────────┐
                               │ SessionManager   │
@@ -87,12 +87,12 @@ All benchmarks run on Apple Silicon (M-series), single process, with in-process 
                               │ "map-reduce"     │
                               └────────┬─────────┘
                                        │ runs on ThreadPool
-                     ┌─────────────────┼─────────────────┐
-                     │                 │                 │
-              ┌──────▼──────┐  ┌───────▼───────┐  ┌──────▼──────┐
+                     ┌─────────────────┼──────────────────┐
+                     │                 │                  │
+              ┌──────▼──────┐  ┌───────▼───────┐  ┌───────▼─────┐
               │   ReAct     │  │ Plan-Execute  │  │  Map-Reduce │
               │ (loop)      │  │ (3-phase)     │  │ (parallel)  │
-              └──────┬──────┘  └───────┬───────┘  └───────┬─────┘
+              └──────┬──────┘  └───────┬───────┘  └──────┬──────┘
                      │                 │                  │
               ┌──────▼─────────────────▼──────────────────▼───────┐
               │                                                   │
@@ -761,6 +761,43 @@ benchmarks/       Head-to-head Python comparison scripts
 examples/         Pre-configured agent examples (incident triage, code review, research)
 configs/          Runtime configuration files
 ```
+
+---
+
+## E2E: Forge + Vortex (In-Process RAG Agent)
+
+Forge's concurrency primitives (`src/core/`) are designed as a reusable library. [Vortex](https://github.com/rahugur/vortex-lock-free-rag) imports them as a git submodule and uses the same MPSC queue, ThreadPool, Semaphore, and Future/Promise to power a lock-free RAG engine (HNSW vector search, continuous batching, 5-stage retrieval pipeline).
+
+The key integration is a **single C++ binary** that runs a Forge ReAct agent with Vortex-backed retrieval — no HTTP hop, no serialization, no Python overhead:
+
+```
+┌─────────────── Single C++ Process ───────────────┐
+│                                                    │
+│  Forge ReAct Agent                                 │
+│    │                                               │
+│    ├─ LLM thinks → calls knowledge_search tool     │
+│    │   └─ Vortex: embed → HNSW → rerank → chunks  │
+│    │      (in-process, ~10ns dispatch, <1ms search) │
+│    │                                               │
+│    ├─ LLM thinks → calls knowledge_search again    │
+│    │   └─ Vortex: multi-hop retrieval              │
+│    │                                               │
+│    └─ LLM synthesizes final answer                 │
+│                                                    │
+│  Shared: ThreadPool, MPSC Queue, Semaphore, etc.   │
+└────────────────────────────────────────────────────┘
+```
+
+See [Vortex's `e2e/rag_agent/`](https://github.com/rahugur/vortex-lock-free-rag/tree/main/e2e/rag_agent) for the full example.
+
+| Forge Primitive | Forge Usage | Vortex Usage |
+|-----------------|-------------|--------------|
+| `MPSCQueue` | Agent session tasks | Incoming RAG queries to scheduler |
+| `ThreadPool` | Workflow execution | Pipeline stages, parallel embedding |
+| `Future/Promise` | Session result delivery | Pipeline stage chaining |
+| `ConcurrentMap` | Active session tracking | Active query tracking |
+| `Semaphore` | LLM call concurrency cap | Embedding API concurrency cap |
+| `RateLimiter` | LLM rate limiting | Embedding + LLM rate limiting |
 
 ---
 
